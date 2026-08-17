@@ -1,36 +1,89 @@
 mod value;
 
+use rand::RngExt;
 use value::Value;
 
+use std::io::{self, Write};
+
+fn predict(weight: &Value, bias: &Value, input_number: f64) -> f64 {
+    let input = Value::new(input_number);
+    let output = input * weight.clone() + bias.clone();
+    output.data()
+}
+
 fn main() {
-    let input = Value::new(1.2);
-    let goal = Value::new(3.4);
-    let weight = Value::new(0.5);
+    let mut rng = rand::rng();
 
-    let learning_rate = 0.01;
+    let data = vec![
+        "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
+    ];
 
-    for step in 0..1250 {
-        weight.0.borrow_mut().grad = 0.0;
+    let points: Vec<(f64, f64)> = (0..=10).map(|i| (i as f64, i as f64)).collect();
 
-        let output = input.clone() * weight.clone();
-        let error = goal.clone() - output.clone();
-        let loss = error.clone() * error.clone();
+    let weight = Value::new(rng.random_range(-1.0..1.0));
+    let bias = Value::new(rng.random_range(-1.0..1.0));
+    let learning_rate = 0.001;
 
-        loss.backward();
+    for epoch in 0..500 {
+        weight.set_grad(0.0);
+        bias.set_grad(0.0);
 
-        let grad = weight.0.borrow().grad;
-        let new_data = weight.0.borrow().data - learning_rate * grad;
-        weight.0.borrow_mut().data = new_data;
+        let mut total_loss = Value::new(0.0);
 
-        if step % 10 == 0 {
-            println!(
-                "Step {}: output = {}, loss = {}",
-                step,
-                output.0.borrow().data,
-                loss.0.borrow().data
-            );
+        for (x, target) in points.iter() {
+            let input = Value::new(*x);
+            let goal = Value::new(*target);
+
+            let output = input * weight.clone() + bias.clone();
+            let error = goal - output;
+            let loss = error.clone() * error.clone();
+
+            total_loss = total_loss + loss;
+        }
+
+        total_loss.backward();
+
+        weight.set_data(weight.data() - learning_rate * weight.grad());
+        bias.set_data(bias.data() - learning_rate * bias.grad());
+
+        if epoch % 50 == 0 {
+            println!("Epoch {}: loss = {}", epoch, total_loss.data());
         }
     }
 
-    println!("Final Weight: {}", weight.0.borrow().data);
+    loop {
+        let mut input = String::new();
+
+        print!("user > ");
+        io::stdout().flush().expect("Failed to flush stdout.");
+
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read user input.");
+
+        input = input.trim().to_string();
+
+        if input == "exit" {
+            break;
+        }
+
+        let num = match input.parse::<f64>() {
+            Ok(num) => num,
+
+            Err(_) => {
+                println!("Please enter a valid number.");
+                continue;
+            }
+        };
+
+        let predicted = predict(&weight, &bias, num);
+        let idx = predicted.round() as i64;
+
+        if idx < 0 || idx >= data.len() as i64 {
+            println!("(out of range - predicted index {})", idx);
+            continue;
+        }
+
+        println!("number_to_word > {}", data[idx as usize]);
+    }
 }

@@ -5,7 +5,6 @@ use std::rc::Rc;
 
 use std::hash::{Hash, Hasher};
 use std::ops::Add;
-use std::ops::Div;
 use std::ops::Mul;
 use std::ops::Neg;
 use std::ops::Sub;
@@ -76,6 +75,22 @@ impl Value {
         };
 
         Value(Rc::new(RefCell::new(vd)))
+    }
+
+    pub fn data(&self) -> f64 {
+        self.0.borrow().data
+    }
+
+    pub fn grad(&self) -> f64 {
+        self.0.borrow().grad
+    }
+
+    pub fn set_data(&self, new_data: f64) {
+        self.0.borrow_mut().data = new_data;
+    }
+
+    pub fn set_grad(&self, new_grad: f64) {
+        self.0.borrow_mut().grad = new_grad;
     }
 
     pub fn backward(&self) {
