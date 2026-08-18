@@ -1,13 +1,16 @@
+mod sdg;
 mod value;
 
 use rand::RngExt;
+
+use sdg::SDG;
 use value::Value;
 
 use std::io::{self, Write};
 
 fn predict(weight: &Value, bias: &Value, input_number: f64) -> f64 {
     let input = Value::new(input_number);
-    let output = input * weight.clone() + bias.clone();
+    let output = input * weight + bias;
     output.data()
 }
 
@@ -22,11 +25,11 @@ fn main() {
 
     let weight = Value::new(rng.random_range(-1.0..1.0));
     let bias = Value::new(rng.random_range(-1.0..1.0));
-    let learning_rate = 0.001;
+
+    let optimizer = SDG::new(vec![weight.clone(), bias.clone()], 0.001);
 
     for epoch in 0..500 {
-        weight.set_grad(0.0);
-        bias.set_grad(0.0);
+        optimizer.zero_grad();
 
         let mut total_loss = Value::new(0.0);
 
@@ -34,7 +37,7 @@ fn main() {
             let input = Value::new(*x);
             let goal = Value::new(*target);
 
-            let output = input * weight.clone() + bias.clone();
+            let output = &input * &weight + &bias;
             let error = goal - output;
             let loss = error.clone() * error.clone();
 
@@ -43,8 +46,7 @@ fn main() {
 
         total_loss.backward();
 
-        weight.set_data(weight.data() - learning_rate * weight.grad());
-        bias.set_data(bias.data() - learning_rate * bias.grad());
+        optimizer.step();
 
         if epoch % 50 == 0 {
             println!("Epoch {}: loss = {}", epoch, total_loss.data());

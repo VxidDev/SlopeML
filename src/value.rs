@@ -11,6 +11,8 @@ use std::ops::Sub;
 
 use std::fmt;
 
+use crate::value;
+
 pub struct ValueData {
     pub data: f64,
     pub grad: f64,
@@ -120,11 +122,8 @@ impl Add for Value {
     type Output = Value;
 
     fn add(self: Value, other: Value) -> Value {
-        let a = self.clone();
-        let b = other.clone();
-
         let out = Value::new_with_children(
-            a.0.borrow().data + b.0.borrow().data,
+            self.0.borrow().data + other.0.borrow().data,
             vec![self.clone(), other.clone()],
         );
 
@@ -139,15 +138,28 @@ impl Add for Value {
     }
 }
 
+impl Add for &Value {
+    type Output = Value;
+
+    fn add(self, other: &Value) -> Value {
+        self.clone() + other.clone()
+    }
+}
+
+impl Add<&Value> for Value {
+    type Output = Value;
+
+    fn add(self, other: &Value) -> Value {
+        self + other.clone()
+    }
+}
+
 impl Mul for Value {
     type Output = Value;
 
     fn mul(self: Value, other: Value) -> Value {
-        let a = self.clone();
-        let b = other.clone();
-
         let out = Value::new_with_children(
-            a.0.borrow().data * b.0.borrow().data,
+            self.0.borrow().data * other.0.borrow().data,
             vec![self.clone(), other.clone()],
         );
 
@@ -161,6 +173,22 @@ impl Mul for Value {
         }));
 
         out
+    }
+}
+
+impl Mul for &Value {
+    type Output = Value;
+
+    fn mul(self, other: &Value) -> Value {
+        self.clone() * other.clone()
+    }
+}
+
+impl Mul<&Value> for Value {
+    type Output = Value;
+
+    fn mul(self, other: &Value) -> Value {
+        self * other.clone()
     }
 }
 
