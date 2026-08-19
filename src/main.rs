@@ -1,17 +1,25 @@
+mod neuron;
 mod sdg;
 mod value;
 
 use rand::RngExt;
 
+use neuron::Neuron;
 use sdg::SDG;
 use value::Value;
 
 use std::io::{self, Write};
 
-fn predict(weight: &Value, bias: &Value, input_number: f64) -> f64 {
-    let input = Value::new(input_number);
-    let output = input * weight + bias;
-    output.data()
+fn mse_loss(predictions: &[Value], targets: &[f64]) -> Value {
+    let mut total = Value::new(0.0);
+
+    for (pred, target) in predictions.iter().zip(targets) {
+        let goal = Value::new(*target);
+        let error = pred - &goal;
+        total = total + &error * &error;
+    }
+
+    total
 }
 
 fn main() {
@@ -23,33 +31,25 @@ fn main() {
 
     let points: Vec<(f64, f64)> = (0..=10).map(|i| (i as f64, i as f64)).collect();
 
-    let weight = Value::new(rng.random_range(-1.0..1.0));
-    let bias = Value::new(rng.random_range(-1.0..1.0));
+    let neuron = Neuron::new(1, &mut rng);
+    let optimizer = SDG::new(neuron.parameters(), 0.001);
 
-    let optimizer = SDG::new(vec![weight.clone(), bias.clone()], 0.001);
-
-    for epoch in 0..500 {
+    for epoch in 0..10 {
         optimizer.zero_grad();
 
-        let mut total_loss = Value::new(0.0);
+        let preds: Vec<Value> = points
+            .iter()
+            .map(|(x, _)| neuron.forward(&[Value::new(*x)]))
+            .collect();
 
-        for (x, target) in points.iter() {
-            let input = Value::new(*x);
-            let goal = Value::new(*target);
+        let targets: Vec<f64> = points.iter().map(|(_, t)| *t).collect();
+        let loss = mse_loss(&preds, &targets);
 
-            let output = &input * &weight + &bias;
-            let error = goal - output;
-            let loss = error.clone() * error.clone();
-
-            total_loss = total_loss + loss;
-        }
-
-        total_loss.backward();
-
+        loss.backward();
         optimizer.step();
 
         if epoch % 50 == 0 {
-            println!("Epoch {}: loss = {}", epoch, total_loss.data());
+            println!("Epoch {}: loss = {}", epoch, loss.data());
         }
     }
 
@@ -78,8 +78,8 @@ fn main() {
             }
         };
 
-        let predicted = predict(&weight, &bias, num);
-        let idx = predicted.round() as i64;
+        let predicted = neuron.forward(&[Value::new(num)]);
+        let idx = predicted.data().round() as i64;
 
         if idx < 0 || idx >= data.len() as i64 {
             println!("(out of range - predicted index {})", idx);

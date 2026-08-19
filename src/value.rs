@@ -207,3 +207,19 @@ impl Sub for Value {
         self + (-other)
     }
 }
+
+impl Sub<&Value> for Value {
+    type Output = Value;
+
+    fn sub(self, other: &Value) -> Value {
+        self + (-other.clone())
+    }
+}
+
+impl Sub for &Value {
+    type Output = Value;
+
+    fn sub(self, other: &Value) -> Value {
+        self.clone() + (-other.clone())
+    }
+}
