@@ -1,14 +1,21 @@
+mod layer;
+mod mlp;
 mod neuron;
 mod sdg;
 mod value;
 
 use rand::RngExt;
 
+use layer::Layer;
+use mlp::MLP;
 use neuron::Neuron;
 use sdg::SDG;
-use value::Value;
+use value::{Graph, Value};
 
-use std::io::{self, Write};
+use std::{
+    f64::consts::PI,
+    io::{self, Write},
+};
 
 fn mse_loss(predictions: &[Value], targets: &[f64]) -> Value {
     let mut total = Value::new(0.0);
@@ -19,39 +26,70 @@ fn mse_loss(predictions: &[Value], targets: &[f64]) -> Value {
         total = total + &error * &error;
     }
 
-    total
+    total * Value::new(1.0 / predictions.len() as f64)
+}
+
+fn parse_f64(str: String) -> (f64, bool) {
+    let x = match str.parse::<f64>() {
+        Ok(x) => x,
+
+        Err(_) => {
+            println!("Please enter a valid number.");
+            return (0.0, false);
+        }
+    };
+
+    (x, true)
 }
 
 fn main() {
     let mut rng = rand::rng();
 
-    let data = vec![
-        "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
-    ];
+    let step = 0.1;
+    let mut x = -2.0 * PI;
+    let mut points: Vec<f64> = Vec::new();
 
-    let points: Vec<(f64, f64)> = (0..=10).map(|i| (i as f64, i as f64)).collect();
+    while x < 2.0 * PI {
+        points.push(x);
+        x += step;
+    }
 
-    let neuron = Neuron::new(1, &mut rng);
-    let optimizer = SDG::new(neuron.parameters(), 0.001);
+    let training_data: Vec<(f64, f64)> = points.iter().map(|&x| (x, x.sin())).collect();
 
-    for epoch in 0..10 {
-        optimizer.zero_grad();
+    let mlp = MLP::new(1, &[16, 16, 1], &mut rng);
+    let mut optimizer = SDG::new(mlp.parameters(), 0.01, 0.5);
 
-        let preds: Vec<Value> = points
-            .iter()
-            .map(|(x, _)| neuron.forward(&[Value::new(*x)]))
-            .collect();
+    let input_leaves: Vec<Value> = training_data.iter().map(|_| Value::new(0.0)).collect();
+    let preds: Vec<Value> = input_leaves
+        .iter()
+        .map(|leaf| mlp.forward(&[leaf.clone()])[0].clone())
+        .collect();
 
-        let targets: Vec<f64> = points.iter().map(|(_, t)| *t).collect();
-        let loss = mse_loss(&preds, &targets);
+    let targets: Vec<f64> = training_data.iter().map(|(_, t)| *t).collect();
+    let loss = mse_loss(&preds, &targets);
+    let graph = Graph::build(&loss);
 
-        loss.backward();
+    let mut epoch = 0;
+
+    while loss.data() > 0.01 && epoch < 100_000 {
+        epoch += 1;
+
+        for (leaf, (x, _)) in input_leaves.iter().zip(&training_data) {
+            leaf.set_data(*x);
+        }
+
+        graph.forward();
+        graph.zero_grad();
+        graph.backward();
+
         optimizer.step();
 
-        if epoch % 50 == 0 {
+        if epoch % 10 == 0 {
             println!("Epoch {}: loss = {}", epoch, loss.data());
         }
     }
+
+    return;
 
     loop {
         let mut input = String::new();
@@ -69,23 +107,15 @@ fn main() {
             break;
         }
 
-        let num = match input.parse::<f64>() {
-            Ok(num) => num,
+        let (x, ok) = parse_f64(input);
 
-            Err(_) => {
-                println!("Please enter a valid number.");
-                continue;
-            }
+        if !ok {
+            continue;
         };
 
-        let predicted = neuron.forward(&[Value::new(num)]);
-        let idx = predicted.data().round() as i64;
+        let x_wrapped = ((x % (2.0 * PI)) + 2.0 * PI) % (2.0 * PI);
 
-        if idx < 0 || idx >= data.len() as i64 {
-            println!("(out of range - predicted index {})", idx);
-            continue;
-        }
-
-        println!("number_to_word > {}", data[idx as usize]);
+        let predicted = mlp.forward(&[Value::new(x_wrapped)])[0].clone();
+        println!("sin > {} (sin({} == {}))", predicted.data(), x, x.sin());
     }
 }

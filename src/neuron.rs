@@ -4,15 +4,17 @@ use crate::Value;
 pub struct Neuron {
     weights: Vec<Value>,
     bias: Value,
+    activation: bool,
 }
 
 impl Neuron {
-    pub fn new(n_inputs: usize, rng: &mut impl RngExt) -> Neuron {
+    pub fn new(n_inputs: usize, activation: bool, rng: &mut impl RngExt) -> Neuron {
         Neuron {
             weights: (0..n_inputs)
                 .map(|_| Value::new(rng.random_range(-1.0..1.0)))
                 .collect(),
             bias: Value::new(rng.random_range(-1.0..1.0)),
+            activation,
         }
     }
 
@@ -23,7 +25,7 @@ impl Neuron {
             sum = sum + w * x;
         }
 
-        sum
+        if self.activation { sum.relu() } else { sum }
     }
 
     pub fn parameters(&self) -> Vec<Value> {

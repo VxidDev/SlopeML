@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::option::Option;
 use std::rc::Rc;
@@ -11,22 +11,29 @@ use std::ops::Sub;
 
 use std::fmt;
 
-use crate::value;
+pub enum ValueOp {
+    Leaf,
+    Add(Value, Value),
+    Mul(Value, Value),
+    Relu(Value),
+}
 
 pub struct ValueData {
-    pub data: f64,
-    pub grad: f64,
+    pub data: Cell<f64>,
+    pub grad: Cell<f64>,
+    op: ValueOp,
+}
 
-    _backward: Option<Box<dyn Fn(Value)>>,
-    _prev: HashSet<Value>,
+pub struct Graph {
+    topo: Vec<Value>,
 }
 
 #[derive(Clone)]
-pub struct Value(pub Rc<RefCell<ValueData>>);
+pub struct Value(pub Rc<ValueData>);
 
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
-        self.0.borrow().data == other.0.borrow().data
+        Rc::ptr_eq(&self.0, &other.0)
     }
 }
 
@@ -38,83 +45,135 @@ impl Hash for Value {
 
 impl Eq for Value {}
 
-fn _build_topo(
-    node: &Value,
-    visited: &mut HashSet<*const RefCell<ValueData>>,
-    topo: &mut Vec<Value>,
-) {
+impl Value {
+    pub fn new(data: f64) -> Value {
+        let vd = ValueData {
+            data: Cell::new(data),
+            grad: Cell::new(0.0),
+            op: ValueOp::Leaf,
+        };
+
+        Value(Rc::new(vd))
+    }
+
+    pub fn new_op(data: f64, op: ValueOp) -> Value {
+        let vd = ValueData {
+            data: Cell::new(data),
+            grad: Cell::new(0.0),
+            op,
+        };
+
+        Value(Rc::new(vd))
+    }
+
+    pub fn data(&self) -> f64 {
+        self.0.data.get()
+    }
+
+    pub fn grad(&self) -> f64 {
+        self.0.grad.get()
+    }
+
+    pub fn set_data(&self, new_data: f64) {
+        self.0.data.set(new_data);
+    }
+
+    pub fn set_grad(&self, new_grad: f64) {
+        self.0.grad.set(new_grad);
+    }
+
+    pub fn children(&self) -> Vec<Value> {
+        match &self.0.op {
+            ValueOp::Leaf => vec![],
+            ValueOp::Add(a, b) | ValueOp::Mul(a, b) => vec![a.clone(), b.clone()],
+            ValueOp::Relu(a) => vec![a.clone()],
+        }
+    }
+
+    pub fn recompute(&self) {
+        let new_data = match &self.0.op {
+            ValueOp::Leaf => return,
+            ValueOp::Add(a, b) => a.data() + b.data(),
+            ValueOp::Mul(a, b) => a.data() * b.data(),
+            ValueOp::Relu(a) => a.data().max(0.0),
+        };
+
+        self.0.data.set(new_data)
+    }
+
+    pub fn propagate(&self) {
+        let g = self.grad();
+
+        match &self.0.op {
+            ValueOp::Leaf => {}
+
+            ValueOp::Add(a, b) => {
+                a.0.grad.set(a.0.grad.get() + g);
+                b.0.grad.set(b.0.grad.get() + g);
+            }
+
+            ValueOp::Mul(a, b) => {
+                let (ad, bd) = (a.data(), b.data());
+
+                a.0.grad.set(a.0.grad.get() + bd * g);
+                b.0.grad.set(b.0.grad.get() + ad * g);
+            }
+
+            ValueOp::Relu(a) => {
+                let local = if self.data() > 0.0 { 1.0 } else { 0.0 };
+                a.0.grad.set(a.0.grad.get() + local * g);
+            }
+        }
+    }
+
+    pub fn relu(&self) -> Value {
+        Value::new_op(self.data().max(0.0), ValueOp::Relu(self.clone()))
+    }
+}
+
+pub fn build_topo(node: &Value, visited: &mut HashSet<*const ValueData>, topo: &mut Vec<Value>) {
     let ptr = Rc::as_ptr(&node.0);
 
-    if !visited.contains(&ptr) {
-        visited.insert(ptr);
-
-        for child in node.0.borrow()._prev.iter() {
-            _build_topo(child, visited, topo);
+    if visited.insert(ptr) {
+        for child in node.children() {
+            build_topo(&child, visited, topo);
         }
 
         topo.push(node.clone());
     }
 }
 
-impl Value {
-    pub fn new(data: f64) -> Value {
-        let vd = ValueData {
-            data: data,
-            grad: 0.0,
-            _backward: None,
-            _prev: HashSet::new(),
-        };
-
-        Value(Rc::new(RefCell::new(vd)))
-    }
-
-    pub fn new_with_children(data: f64, children: Vec<Value>) -> Value {
-        let vd = ValueData {
-            data: data,
-            grad: 0.0,
-            _backward: None,
-            _prev: children.into_iter().collect(),
-        };
-
-        Value(Rc::new(RefCell::new(vd)))
-    }
-
-    pub fn data(&self) -> f64 {
-        self.0.borrow().data
-    }
-
-    pub fn grad(&self) -> f64 {
-        self.0.borrow().grad
-    }
-
-    pub fn set_data(&self, new_data: f64) {
-        self.0.borrow_mut().data = new_data;
-    }
-
-    pub fn set_grad(&self, new_grad: f64) {
-        self.0.borrow_mut().grad = new_grad;
-    }
-
-    pub fn backward(&self) {
-        let mut topo = Vec::new();
-        let mut visited = HashSet::new();
-
-        _build_topo(self, &mut visited, &mut topo);
-
-        self.0.borrow_mut().grad = 1.0;
-
-        for v in topo.iter().rev() {
-            if let Some(f) = &v.0.borrow()._backward {
-                f(v.clone());
-            }
-        }
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Value(data={}, grad={})", self.data(), self.grad())
     }
 }
 
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let val = self.0.borrow();
-        write!(f, "Value(data={}, grad={})", val.data, val.grad)
+impl Graph {
+    pub fn build(output: &Value) -> Graph {
+        let mut topo = Vec::new();
+        let mut visited = HashSet::new();
+        build_topo(output, &mut visited, &mut topo);
+        Graph { topo }
+    }
+
+    pub fn forward(&self) {
+        for node in &self.topo {
+            node.recompute();
+        }
+    }
+
+    pub fn zero_grad(&self) {
+        for node in &self.topo {
+            node.set_grad(0.0);
+        }
+    }
+
+    pub fn backward(&self) {
+        self.topo.last().unwrap().set_grad(1.0);
+        for node in self.topo.iter().rev() {
+            node.propagate();
+        }
     }
 }
 
@@ -122,19 +181,8 @@ impl Add for Value {
     type Output = Value;
 
     fn add(self: Value, other: Value) -> Value {
-        let out = Value::new_with_children(
-            self.0.borrow().data + other.0.borrow().data,
-            vec![self.clone(), other.clone()],
-        );
-
-        out.0.borrow_mut()._backward = Some(Box::new(move |out_val: Value| {
-            let out_grad = out_val.0.borrow().grad;
-
-            self.0.borrow_mut().grad += out_grad;
-            other.0.borrow_mut().grad += out_grad;
-        }));
-
-        out
+        let out_data = self.data() + other.data();
+        Value::new_op(out_data, ValueOp::Add(self, other))
     }
 }
 
@@ -142,7 +190,8 @@ impl Add for &Value {
     type Output = Value;
 
     fn add(self, other: &Value) -> Value {
-        self.clone() + other.clone()
+        let out_data = self.data() + other.data();
+        Value::new_op(out_data, ValueOp::Add(self.clone(), other.clone()))
     }
 }
 
@@ -158,21 +207,8 @@ impl Mul for Value {
     type Output = Value;
 
     fn mul(self: Value, other: Value) -> Value {
-        let out = Value::new_with_children(
-            self.0.borrow().data * other.0.borrow().data,
-            vec![self.clone(), other.clone()],
-        );
-
-        out.0.borrow_mut()._backward = Some(Box::new(move |out_val: Value| {
-            let out_grad = out_val.0.borrow().grad;
-            let other_data = other.0.borrow().data;
-            let self_data = self.0.borrow().data;
-
-            self.0.borrow_mut().grad += other_data * out_grad;
-            other.0.borrow_mut().grad += self_data * out_grad;
-        }));
-
-        out
+        let out_data = self.data() * other.data();
+        Value::new_op(out_data, ValueOp::Mul(self, other))
     }
 }
 
@@ -180,7 +216,8 @@ impl Mul for &Value {
     type Output = Value;
 
     fn mul(self, other: &Value) -> Value {
-        self.clone() * other.clone()
+        let out_data = self.data() * other.data();
+        Value::new_op(out_data, ValueOp::Mul(self.clone(), other.clone()))
     }
 }
 
